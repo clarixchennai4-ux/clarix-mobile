@@ -72,12 +72,44 @@
     }
   }
 
-  /* ---------- Power BI: switch embedded reports to the phone layout ---------- */
-  var LAYOUT_MASTER = 0, LAYOUT_MOBILE_PORTRAIT = 2;
+  /* ---------- Power BI reports ---------- */
+  var CUSTOM = 1, MOBILE_PORTRAIT = 2, FIT_TO_PAGE = 0, FIT_TO_WIDTH = 1;
+  var fullHost = null, btn = null;
 
-  function isPortraitPhone() {
-    return window.innerWidth <= 900 && window.innerHeight > window.innerWidth;
+  var pbiCss = [
+    '.clarix-pbi-full { position: fixed !important; top: 0 !important; left: 0 !important;',
+    '  right: 0 !important; bottom: 0 !important; width: 100vw !important; height: 100vh !important;',
+    '  max-width: none !important; min-height: 0 !important; margin: 0 !important;',
+    '  z-index: 2147483640 !important; background: #fff !important; }',
+    'html.clarix-pbi-lock, html.clarix-pbi-lock body { overflow: hidden !important; }',
+    '#clarix-pbi-full-btn { position: fixed; right: 14px; bottom: 18px; z-index: 2147483647;',
+    '  background: #1d4ed8; color: #fff; border: 0; border-radius: 22px; padding: 10px 16px;',
+    '  font: 600 14px system-ui, -apple-system, Roboto, sans-serif; box-shadow: 0 4px 14px rgba(0,0,0,.25); }',
+    '#clarix-pbi-full-btn.clarix-full { top: 8px; bottom: auto; right: 8px; padding: 6px 12px;',
+    '  font-size: 13px; background: rgba(17,24,39,.75); }'
+  ].join('\n');
+
+  function addPbiStyle() {
+    if (document.getElementById('clarix-pbi-style')) return;
+    var s = document.createElement('style');
+    s.id = 'clarix-pbi-style';
+    s.textContent = pbiCss;
+    (document.head || document.documentElement).appendChild(s);
   }
+
+  function nativeLandscape(on) {
+    try {
+      var C = window.Capacitor;
+      if (!C) return;
+      var P = (C.Plugins && C.Plugins.ClarixNative) ||
+              (C.registerPlugin ? C.registerPlugin('ClarixNative') : null);
+      if (P) settle(P.setLandscape({ on: !!on }));
+    } catch (e) {}
+  }
+
+  function settle(p) { if (p && p.catch) p.catch(function () {}); }
+
+  function setImp(el, prop, val) { el.style.setProperty(prop, val, 'important'); }
 
   function findEmbedHost(iframe) {
     var el = iframe;
@@ -87,60 +119,133 @@
     return null;
   }
 
-  function sizeContainer(host) {
-    /* fill the rest of the screen below wherever the report starts */
-    var top = Math.max(0, host.getBoundingClientRect().top + window.scrollY);
-    var h = Math.max(480, window.innerHeight - Math.min(top, 160) - 8);
-    host.style.width = '100%';
-    host.style.maxWidth = '100%';
-    host.style.height = h + 'px';
-    host.style.minHeight = h + 'px';
-    var f = host.querySelector('iframe');
-    if (f) { f.style.width = '100%'; f.style.height = '100%'; f.style.border = '0'; }
+  function isReport(host) {
+    var e = host.powerBiEmbed;
+    if (!e || typeof e.updateSettings !== 'function') return false;
+    var t = e.embedtype || (e.config && e.config.type);
+    return !t || String(t).toLowerCase() === 'report';
   }
 
-  function applyLayout(host) {
-    var embed = host.powerBiEmbed;
-    if (!embed || typeof embed.updateSettings !== 'function') return;
-    var type = embed.embedtype || (embed.config && embed.config.type);
-    if (type && String(type).toLowerCase() !== 'report') return;
-
-    var want = isPortraitPhone() ? LAYOUT_MOBILE_PORTRAIT : LAYOUT_MASTER;
-    if (host.__clarixLayout === want) return;
-    host.__clarixLayout = want;
-
-    if (want === LAYOUT_MOBILE_PORTRAIT) sizeContainer(host);
-    var settings = want === LAYOUT_MOBILE_PORTRAIT
-      ? { layoutType: LAYOUT_MOBILE_PORTRAIT }
-      : { layoutType: 1, customLayout: { displayOption: 1 } }; /* landscape: fit to width */
-    try {
-      var p = embed.updateSettings(settings);
-      if (p && p.catch) p.catch(function () { host.__clarixLayout = null; });
-    } catch (e) { host.__clarixLayout = null; }
-
-    /* the report may not have finished loading yet — re-apply once it has */
-    if (!host.__clarixHooked && typeof embed.on === 'function') {
-      host.__clarixHooked = true;
-      embed.on('loaded', function () { host.__clarixLayout = null; applyLayout(host); });
+  function reportHosts() {
+    var out = [];
+    var frames = document.querySelectorAll('iframe');
+    for (var i = 0; i < frames.length; i++) {
+      if ((frames[i].getAttribute('src') || '').indexOf('powerbi') === -1) continue;
+      var h = findEmbedHost(frames[i]);
+      if (h && out.indexOf(h) === -1 && isReport(h)) out.push(h);
     }
+    return out;
+  }
+
+  function styleFrame(host) {
+    var f = host.querySelector('iframe');
+    if (f) { setImp(f, 'width', '100%'); setImp(f, 'height', '100%'); f.style.border = '0'; }
+  }
+
+  /* does the current report page have a phone layout saved in Power BI? */
+  function checkMobileLayout(host) {
+    if (host.__clarixHasMobile !== undefined) return Promise.resolve(host.__clarixHasMobile);
+    try {
+      return host.powerBiEmbed.getActivePage().then(function (page) {
+        host.__clarixPageSize = page.defaultSize;
+        return page.hasLayout ? page.hasLayout(MOBILE_PORTRAIT) : false;
+      }).then(function (has) {
+        host.__clarixHasMobile = !!has;
+        return host.__clarixHasMobile;
+      }).catch(function () { return false; });
+    } catch (e) { return Promise.resolve(false); }
+  }
+
+  /* upright phone: phone layout if it exists, otherwise desktop page fitted to width, no blank space */
+  function layoutInline(host) {
+    if (host === fullHost || window.innerWidth > 900) return;
+    host.__clarixW = window.innerWidth;
+    checkMobileLayout(host).then(function (hasMobile) {
+      if (host === fullHost) return;
+      setImp(host, 'width', '100%');
+      setImp(host, 'max-width', '100%');
+      styleFrame(host);
+      var h;
+      if (hasMobile) {
+        var top = Math.max(0, host.getBoundingClientRect().top + window.scrollY);
+        h = Math.max(480, window.innerHeight - Math.min(top, 160) - 8);
+        settle(host.powerBiEmbed.updateSettings({ layoutType: MOBILE_PORTRAIT }));
+      } else {
+        var sz = host.__clarixPageSize;
+        var ratio = (sz && sz.width && sz.height) ? sz.height / sz.width : 9 / 16;
+        h = Math.round(host.clientWidth * ratio) + 8;
+        settle(host.powerBiEmbed.updateSettings({
+          layoutType: CUSTOM, customLayout: { displayOption: FIT_TO_WIDTH }
+        }));
+      }
+      setImp(host, 'height', h + 'px');
+      setImp(host, 'min-height', h + 'px');
+    });
+  }
+
+  function enterFull(host) {
+    fullHost = host;
+    host.__clarixSaved = host.getAttribute('style') || '';
+    host.classList.add('clarix-pbi-full');
+    document.documentElement.classList.add('clarix-pbi-lock');
+    styleFrame(host);
+    nativeLandscape(true);
+    settle(host.powerBiEmbed.updateSettings({
+      layoutType: CUSTOM, customLayout: { displayOption: FIT_TO_PAGE }
+    }));
+    updateButton();
+  }
+
+  function exitFull() {
+    var host = fullHost;
+    fullHost = null;
+    nativeLandscape(false);
+    document.documentElement.classList.remove('clarix-pbi-lock');
+    if (host) {
+      host.classList.remove('clarix-pbi-full');
+      host.setAttribute('style', host.__clarixSaved || '');
+      setTimeout(function () { layoutInline(host); }, 600);
+    }
+    updateButton();
+  }
+  window.__clarixExitFull = exitFull;
+
+  function updateButton() {
+    var hosts = reportHosts();
+    if (fullHost && hosts.indexOf(fullHost) === -1) { exitFull(); return; } /* navigated away */
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.id = 'clarix-pbi-full-btn';
+      btn.type = 'button';
+      btn.addEventListener('click', function () {
+        if (fullHost) { exitFull(); return; }
+        var h = reportHosts()[0];
+        if (h) enterFull(h);
+      });
+    }
+    if (!btn.parentNode && document.body) document.body.appendChild(btn);
+    btn.textContent = fullHost ? '✕  Exit full screen' : '⤢  Full screen';
+    btn.className = fullHost ? 'clarix-full' : '';
+    btn.style.display = (fullHost || hosts.length) ? 'block' : 'none';
   }
 
   function fixPowerBI() {
-    var frames = document.querySelectorAll('iframe[src*="powerbi.com"], iframe[src*="powerbi"]');
-    for (var i = 0; i < frames.length; i++) {
-      var host = findEmbedHost(frames[i]);
-      if (host) applyLayout(host);
+    addPbiStyle();
+    var hosts = reportHosts();
+    for (var i = 0; i < hosts.length; i++) {
+      var host = hosts[i];
+      if (!host.__clarixHooked && typeof host.powerBiEmbed.on === 'function') {
+        host.__clarixHooked = true;
+        var relayout = (function (h) {
+          return function () { h.__clarixHasMobile = undefined; h.__clarixW = 0; layoutInline(h); };
+        })(host);
+        host.powerBiEmbed.on('loaded', relayout);
+        host.powerBiEmbed.on('pageChanged', relayout);
+      }
+      if (host !== fullHost && host.__clarixW !== window.innerWidth) layoutInline(host);
     }
+    updateButton();
   }
-
-  window.addEventListener('orientationchange', function () {
-    setTimeout(function () {
-      document.querySelectorAll('iframe').forEach(function (f) {
-        var h = findEmbedHost(f);
-        if (h) { h.__clarixLayout = null; applyLayout(h); }
-      });
-    }, 400);
-  });
 
   var timer = null;
   function schedule() {

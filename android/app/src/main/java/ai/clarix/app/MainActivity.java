@@ -1,6 +1,11 @@
 package ai.clarix.app;
 
 import android.app.DownloadManager;
+import android.content.pm.ActivityInfo;
+import androidx.activity.OnBackPressedCallback;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import android.content.Context;
 import android.net.Uri;
 import android.os.Bundle;
@@ -15,10 +20,42 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
 public class MainActivity extends BridgeActivity {
+
+    // Back button leaves Power BI full screen instead of leaving the page
+    private final OnBackPressedCallback exitFullScreen = new OnBackPressedCallback(false) {
+        @Override
+        public void handleOnBackPressed() {
+            getBridge().getWebView().evaluateJavascript(
+                "window.__clarixExitFull && window.__clarixExitFull()", null);
+        }
+    };
+
+    /** Rotates to landscape and hides the system bars (or restores them). */
+    public void setFullScreenLandscape(final boolean on) {
+        runOnUiThread(() -> {
+            setRequestedOrientation(on
+                ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                : ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+            WindowInsetsControllerCompat bars =
+                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+            if (on) {
+                bars.setSystemBarsBehavior(
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                bars.hide(WindowInsetsCompat.Type.systemBars());
+            } else {
+                bars.show(WindowInsetsCompat.Type.systemBars());
+            }
+            exitFullScreen.setEnabled(on);
+        });
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(ClarixNativePlugin.class);
         super.onCreate(savedInstanceState);
         WebView webView = getBridge().getWebView();
+
+        getOnBackPressedDispatcher().addCallback(this, exitFullScreen);
 
         // Pinch-to-zoom as a fallback for any page that still doesn't fit
         webView.getSettings().setSupportZoom(true);
