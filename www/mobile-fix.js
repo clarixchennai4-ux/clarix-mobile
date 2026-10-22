@@ -196,8 +196,16 @@
     updateButton();
   }
 
+  function autoFull(host) {
+    host.__clarixAutoPending = true;
+    setTimeout(function () {
+      if (!fullHost && !host.__clarixUserExited && document.body.contains(host)) enterFull(host);
+    }, 700);
+  }
+
   function exitFull() {
     var host = fullHost;
+    if (host) host.__clarixUserExited = true;
     fullHost = null;
     nativeLandscape(false);
     document.documentElement.classList.remove('clarix-pbi-lock');
@@ -243,6 +251,15 @@
         host.powerBiEmbed.on('pageChanged', relayout);
       }
       if (host !== fullHost && host.__clarixW !== window.innerWidth) layoutInline(host);
+    }
+    /* open dashboards straight in landscape full screen, fitted to the screen */
+    if (!fullHost) {
+      for (var j = 0; j < hosts.length; j++) {
+        if (!hosts[j].__clarixUserExited && !hosts[j].__clarixAutoPending) {
+          autoFull(hosts[j]);
+          break;
+        }
+      }
     }
     updateButton();
   }
