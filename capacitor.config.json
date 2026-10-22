@@ -1,0 +1,33 @@
+{
+  "appId": "ai.clarix.app",
+  "appName": "Clarix",
+  "webDir": "www",
+  "server": {
+    "url": "https://app.clarixai.com",
+    "cleartext": false,
+    "errorPath": "offline.html",
+    "allowNavigation": ["app.clarixai.com", "*.clarixai.com"]
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "ios": {
+    "contentInset": "always",
+    "limitsNavigationsToAppBoundDomains": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "launchAutoHide": true,
+      "backgroundColor": "#0B1220",
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#0B1220",
+      "overlaysWebView": false
+    }
+  }
+}
