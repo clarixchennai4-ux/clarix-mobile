@@ -10,12 +10,36 @@ import android.webkit.URLUtil;
 import android.webkit.WebView;
 import android.widget.Toast;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.WebViewListener;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         WebView webView = getBridge().getWebView();
+
+        // Pinch-to-zoom as a fallback for any page that still doesn't fit
+        webView.getSettings().setSupportZoom(true);
+        webView.getSettings().setBuiltInZoomControls(true);
+        webView.getSettings().setDisplayZoomControls(false);
+
+        // Inject mobile layout fixes into every page of app.clarixai.com
+        final String fixJs = loadAsset("public/mobile-fix.js");
+        if (fixJs != null) {
+            getBridge().addWebViewListener(new WebViewListener() {
+                @Override
+                public void onPageCommitVisible(WebView view, String url) {
+                    view.evaluateJavascript(fixJs, null);
+                }
+
+                @Override
+                public void onPageLoaded(WebView view) {
+                    view.evaluateJavascript(fixJs, null);
+                }
+            });
+        }
 
         // Keep the user signed in between app launches
         CookieManager.getInstance().setAcceptCookie(true);
@@ -42,6 +66,21 @@ public class MainActivity extends BridgeActivity {
                 Toast.makeText(this, "Download failed", Toast.LENGTH_SHORT).show();
             }
         });
+    }
+
+    private String loadAsset(String path) {
+        try (InputStream in = getAssets().open(path)) {
+            byte[] buf = new byte[in.available()];
+            int read = 0;
+            while (read < buf.length) {
+                int r = in.read(buf, read, buf.length - read);
+                if (r < 0) break;
+                read += r;
+            }
+            return new String(buf, 0, read, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     @Override
