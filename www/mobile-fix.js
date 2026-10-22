@@ -72,16 +72,89 @@
     }
   }
 
+  /* ---------- Power BI: switch embedded reports to the phone layout ---------- */
+  var LAYOUT_MASTER = 0, LAYOUT_MOBILE_PORTRAIT = 2;
+
+  function isPortraitPhone() {
+    return window.innerWidth <= 900 && window.innerHeight > window.innerWidth;
+  }
+
+  function findEmbedHost(iframe) {
+    var el = iframe;
+    for (var i = 0; el && i < 8; i++, el = el.parentElement) {
+      if (el.powerBiEmbed) return el;
+    }
+    return null;
+  }
+
+  function sizeContainer(host) {
+    /* fill the rest of the screen below wherever the report starts */
+    var top = Math.max(0, host.getBoundingClientRect().top + window.scrollY);
+    var h = Math.max(480, window.innerHeight - Math.min(top, 160) - 8);
+    host.style.width = '100%';
+    host.style.maxWidth = '100%';
+    host.style.height = h + 'px';
+    host.style.minHeight = h + 'px';
+    var f = host.querySelector('iframe');
+    if (f) { f.style.width = '100%'; f.style.height = '100%'; f.style.border = '0'; }
+  }
+
+  function applyLayout(host) {
+    var embed = host.powerBiEmbed;
+    if (!embed || typeof embed.updateSettings !== 'function') return;
+    var type = embed.embedtype || (embed.config && embed.config.type);
+    if (type && String(type).toLowerCase() !== 'report') return;
+
+    var want = isPortraitPhone() ? LAYOUT_MOBILE_PORTRAIT : LAYOUT_MASTER;
+    if (host.__clarixLayout === want) return;
+    host.__clarixLayout = want;
+
+    if (want === LAYOUT_MOBILE_PORTRAIT) sizeContainer(host);
+    var settings = want === LAYOUT_MOBILE_PORTRAIT
+      ? { layoutType: LAYOUT_MOBILE_PORTRAIT }
+      : { layoutType: 1, customLayout: { displayOption: 1 } }; /* landscape: fit to width */
+    try {
+      var p = embed.updateSettings(settings);
+      if (p && p.catch) p.catch(function () { host.__clarixLayout = null; });
+    } catch (e) { host.__clarixLayout = null; }
+
+    /* the report may not have finished loading yet — re-apply once it has */
+    if (!host.__clarixHooked && typeof embed.on === 'function') {
+      host.__clarixHooked = true;
+      embed.on('loaded', function () { host.__clarixLayout = null; applyLayout(host); });
+    }
+  }
+
+  function fixPowerBI() {
+    var frames = document.querySelectorAll('iframe[src*="powerbi.com"], iframe[src*="powerbi"]');
+    for (var i = 0; i < frames.length; i++) {
+      var host = findEmbedHost(frames[i]);
+      if (host) applyLayout(host);
+    }
+  }
+
+  window.addEventListener('orientationchange', function () {
+    setTimeout(function () {
+      document.querySelectorAll('iframe').forEach(function (f) {
+        var h = findEmbedHost(f);
+        if (h) { h.__clarixLayout = null; applyLayout(h); }
+      });
+    }, 400);
+  });
+
   var timer = null;
   function schedule() {
     if (timer) clearTimeout(timer);
-    timer = setTimeout(function () { addStyle(); fitWide(); }, 300);
+    timer = setTimeout(function () { addStyle(); fitWide(); fixPowerBI(); }, 300);
   }
 
   function start() {
     addStyle();
     fixViewport();
     fitWide();
+    fixPowerBI();
+    /* reports load late — check again a few times after start */
+    [1500, 4000, 8000].forEach(function (t) { setTimeout(fixPowerBI, t); });
     /* single-page app: re-check whenever the page content changes */
     new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
     window.addEventListener('resize', schedule);
