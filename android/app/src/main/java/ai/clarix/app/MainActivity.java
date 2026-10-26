@@ -28,6 +28,13 @@ public class MainActivity extends BridgeActivity {
         bars.hide(WindowInsetsCompat.Type.systemBars());
     }
 
+    /** "portrait" for the login screen, "landscape" (desktop view) everywhere else. */
+    public void applyOrientation(final String mode) {
+        runOnUiThread(() -> setRequestedOrientation("portrait".equals(mode)
+            ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            : ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE));
+    }
+
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
@@ -36,10 +43,12 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(ClarixNativePlugin.class);
         super.onCreate(savedInstanceState);
 
-        // Landscape, full screen — like using Clarix on a laptop
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+        // Start upright for the login screen; the page script turns it
+        // sideways (desktop view) once the user is signed in.
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT);
         hideSystemBars();
         WebView webView = getBridge().getWebView();
 
