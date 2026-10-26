@@ -7,6 +7,8 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import android.content.Context;
 import android.os.Build;
+import android.view.View;
+import java.security.KeyStore;
 import android.view.WindowManager;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -60,6 +62,19 @@ public class MainActivity extends BridgeActivity {
         });
     }
 
+    /** Delete the login an earlier version of the app saved; logins now live in the phone's password manager. */
+    private void removeOldSavedLogin() {
+        try {
+            getSharedPreferences("clarix_login", Context.MODE_PRIVATE).edit().clear().commit();
+            deleteSharedPreferences("clarix_login");
+        } catch (Exception ignored) {}
+        try {
+            KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
+            ks.load(null);
+            if (ks.containsAlias("clarix_login_key")) ks.deleteEntry("clarix_login_key");
+        } catch (Exception ignored) {}
+    }
+
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
@@ -76,7 +91,13 @@ public class MainActivity extends BridgeActivity {
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT);
         useWholeScreen();
         hideSystemBars();
+        removeOldSavedLogin();
         WebView webView = getBridge().getWebView();
+
+        // Let the phone's password manager see the login boxes, suggest saved logins and offer to save new ones
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            webView.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_YES);
+        }
 
         // Lay pages out at desktop width and zoom out to fit the screen
         webView.getSettings().setUseWideViewPort(true);

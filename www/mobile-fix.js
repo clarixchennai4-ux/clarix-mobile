@@ -2,8 +2,8 @@
    - Login screen: upright (portrait), normal phone layout.
    - Every other screen: sideways (landscape), laid out at desktop width and
      scaled to fit, so it looks like Clarix on a laptop.
-   - Remembers the user ID and password after a successful login and fills
-     them in next time (stored encrypted on the phone by the app). */
+   - Login boxes work with the phone's own password manager; the app itself
+     stores no user IDs or passwords. */
 (function () {
   if (window.__clarixPageScript) return;
   window.__clarixPageScript = true;
@@ -73,8 +73,12 @@
     setViewport(viewportFor(mode));
     callNative('setOrientation', { mode: mode === 'login' ? 'portrait' : 'landscape' });
 
-    if (mode === 'login') fillSavedLogin();
-    else ensureFitted();
+    if (mode === 'login') labelLoginBoxes();
+    else {
+      if (prev === 'login' && attempted) callNative('loginSucceeded');
+      attempted = false;
+      ensureFitted();
+    }
   }
 
   /* If the page didn't zoom out to the desktop width after turning, reload once. */
@@ -90,11 +94,10 @@
     }, 1500);
   }
 
-  /* ---------- remember user ID & password ---------- */
-  var saved = null;            /* loaded from the phone once, then reused */
-  var loading = false;
-  var lastSaved = '';
-
+  /* ---------- phone password manager ----------
+     The app stores nothing. It labels the login boxes so the phone's password
+     manager recognises them (suggests saved logins when the user ID box is tapped),
+     and after a successful login asks the phone to offer "Save password?". */
   function usernameField(pw) {
     var scopes = [pw && pw.form, pw && pw.closest('.modal, .card, section, main, div'), document];
     for (var s = 0; s < scopes.length; s++) {
@@ -108,62 +111,26 @@
     return null;
   }
 
-  function setInputValue(el, value) {
-    el.focus();
-    var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-    setter.call(el, value);
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.blur();
-  }
-
-  /* fill each login box once (if the form redraws, the new boxes get filled too;
-     a box the user has cleared is left alone) */
-  function fillOnce(el, value) {
-    if (!el || !value || el.__clarixFilled || el.value) return;
-    el.__clarixFilled = true;
-    setInputValue(el, value);
-  }
-
-  function fillSavedLogin() {
+  function labelLoginBoxes() {
     var pw = passwordField();
     if (!pw) return;
-    if (!saved) {
-      if (loading) return;
-      loading = true;
-      callNative('getLogin').then(function (r) {
-        loading = false;
-        if (r && r.username && r.password) { saved = r; fillSavedLogin(); }
-      });
-      return;
-    }
-    fillOnce(usernameField(pw), saved.username);
-    fillOnce(pw, saved.password);
-    var remember = document.querySelector('input[type="checkbox"][name="rememberMe"], input[type="checkbox"]#rememberMe');
-    if (remember && !remember.checked && !remember.__clarixFilled) { remember.__clarixFilled = true; remember.click(); }
+    if (pw.getAttribute('autocomplete') !== 'current-password') pw.setAttribute('autocomplete', 'current-password');
+    var user = usernameField(pw);
+    if (user && user.getAttribute('autocomplete') !== 'username') user.setAttribute('autocomplete', 'username');
   }
 
-  function captureLogin() {
+  /* remember that Sign in was pressed, so the save offer is made only if it worked */
+  var attempted = false;
+  function markAttempt() {
     var pw = passwordField();
-    if (!pw || !pw.value) return;
-    var user = usernameField(pw);
-    if (!user || !user.value) return;
-    var key = user.value + '\n' + pw.value;
-    if (key === lastSaved) return;
-    lastSaved = key;
-    saved = { username: user.value, password: pw.value };
-    callNative('saveLogin', saved);
+    if (pw && pw.value) attempted = true;
   }
-  document.addEventListener('submit', captureLogin, true);
+  document.addEventListener('submit', markAttempt, true);
   document.addEventListener('click', function (e) {
     var b = e.target && e.target.closest && e.target.closest('button, input[type="submit"], [role="button"]');
-    if (b) captureLogin();
+    if (b) markAttempt();
   }, true);
-  document.addEventListener('keydown', function (e) { if (e.key === 'Enter') captureLogin(); }, true);
-  /* also catch it as the user leaves the password box */
-  document.addEventListener('change', function (e) {
-    if (e.target && e.target.type === 'password') captureLogin();
-  }, true);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Enter') markAttempt(); }, true);
 
   /* ---------- watch for screen changes ---------- */
   var timer = null;
@@ -174,7 +141,7 @@
     if (mode === null && !hasToken() && !passwordField() && Date.now() - startedAt < 4000) return;
     var next = isLoginScreen() ? 'login' : 'app';
     applyMode(next);
-    if (mode === 'login') fillSavedLogin();
+    if (mode === 'login') labelLoginBoxes();
     /* keep our viewport if the site rewrites it */
     setViewport(viewportFor(mode));
   }
