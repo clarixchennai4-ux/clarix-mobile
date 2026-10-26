@@ -2,7 +2,6 @@ package ai.clarix.app;
 
 import android.app.DownloadManager;
 import android.content.pm.ActivityInfo;
-import androidx.activity.OnBackPressedCallback;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -21,48 +20,39 @@ import java.nio.charset.StandardCharsets;
 
 public class MainActivity extends BridgeActivity {
 
-    // Back button leaves Power BI full screen instead of leaving the page
-    private final OnBackPressedCallback exitFullScreen = new OnBackPressedCallback(false) {
-        @Override
-        public void handleOnBackPressed() {
-            getBridge().getWebView().evaluateJavascript(
-                "window.__clarixExitFull && window.__clarixExitFull()", null);
-        }
-    };
+    /** Hide the phone's status and navigation bars; a swipe from the edge shows them briefly. */
+    private void hideSystemBars() {
+        WindowInsetsControllerCompat bars =
+            WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        bars.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        bars.hide(WindowInsetsCompat.Type.systemBars());
+    }
 
-    /** Rotates to landscape and hides the system bars (or restores them). */
-    public void setFullScreenLandscape(final boolean on) {
-        runOnUiThread(() -> {
-            setRequestedOrientation(on
-                ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                : ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
-            WindowInsetsControllerCompat bars =
-                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
-            if (on) {
-                bars.setSystemBarsBehavior(
-                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-                bars.hide(WindowInsetsCompat.Type.systemBars());
-            } else {
-                bars.show(WindowInsetsCompat.Type.systemBars());
-            }
-            exitFullScreen.setEnabled(on);
-        });
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) hideSystemBars();
     }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        registerPlugin(ClarixNativePlugin.class);
         super.onCreate(savedInstanceState);
+
+        // Landscape, full screen — like using Clarix on a laptop
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+        hideSystemBars();
         WebView webView = getBridge().getWebView();
 
-        getOnBackPressedDispatcher().addCallback(this, exitFullScreen);
+        // Lay pages out at desktop width and zoom out to fit the screen
+        webView.getSettings().setUseWideViewPort(true);
+        webView.getSettings().setLoadWithOverviewMode(true);
 
-        // Pinch-to-zoom as a fallback for any page that still doesn't fit
+        // Pinch-to-zoom to read small details
         webView.getSettings().setSupportZoom(true);
         webView.getSettings().setBuiltInZoomControls(true);
         webView.getSettings().setDisplayZoomControls(false);
 
-        // Inject mobile layout fixes into every page of app.clarixai.com
+        // Apply the desktop view to every page of app.clarixai.com
         final String fixJs = loadAsset("public/mobile-fix.js");
         if (fixJs != null) {
             getBridge().addWebViewListener(new WebViewListener() {
