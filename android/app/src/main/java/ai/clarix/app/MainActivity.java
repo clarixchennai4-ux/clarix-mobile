@@ -6,6 +6,10 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import android.content.Context;
+import android.os.Build;
+import android.view.WindowManager;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
@@ -35,6 +39,27 @@ public class MainActivity extends BridgeActivity {
             : ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE));
     }
 
+    /**
+     * Draw right to every edge of the screen, including beside the front camera,
+     * so there is no black strip. Only the keyboard pushes the page up.
+     */
+    private void useWholeScreen() {
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.layoutInDisplayCutoutMode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                ? WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                : WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(lp);
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(getWindow().getDecorView(), (v, insets) -> {
+            Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
+            boolean keyboard = insets.isVisible(WindowInsetsCompat.Type.ime());
+            v.setPadding(0, 0, 0, keyboard ? ime.bottom : 0);
+            return insets;
+        });
+    }
+
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
@@ -49,6 +74,7 @@ public class MainActivity extends BridgeActivity {
         // Start upright for the login screen; the page script turns it
         // sideways (desktop view) once the user is signed in.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT);
+        useWholeScreen();
         hideSystemBars();
         WebView webView = getBridge().getWebView();
 

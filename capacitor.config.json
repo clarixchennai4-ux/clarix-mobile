@@ -33,7 +33,7 @@
       "overlaysWebView": false
     },
     "SystemBars": {
-      "insetsHandling": "css"
+      "insetsHandling": "disable"
     }
   }
 }

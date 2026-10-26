@@ -73,14 +73,8 @@
     setViewport(viewportFor(mode));
     callNative('setOrientation', { mode: mode === 'login' ? 'portrait' : 'landscape' });
 
-    if (mode === 'login') {
-      filledThisVisit = false;
-      fillSavedLogin();
-    } else {
-      if (prev === 'login' && pending) { callNative('saveLogin', pending); }
-      pending = null;
-      ensureFitted();
-    }
+    if (mode === 'login') fillSavedLogin();
+    else ensureFitted();
   }
 
   /* If the page didn't zoom out to the desktop width after turning, reload once. */
@@ -97,54 +91,79 @@
   }
 
   /* ---------- remember user ID & password ---------- */
-  var pending = null;          /* typed on the login screen, saved once login succeeds */
-  var filledThisVisit = false;
+  var saved = null;            /* loaded from the phone once, then reused */
+  var loading = false;
+  var lastSaved = '';
 
   function usernameField(pw) {
-    var scope = (pw && pw.form) || document;
-    var named = scope.querySelector('input[name="username"], input#username, input[name="login"], input[name="email"], input[type="email"]');
-    if (visible(named)) return named;
-    var inputs = scope.querySelectorAll('input[type="text"], input:not([type])');
-    for (var i = 0; i < inputs.length; i++) if (visible(inputs[i])) return inputs[i];
+    var scopes = [pw && pw.form, pw && pw.closest('.modal, .card, section, main, div'), document];
+    for (var s = 0; s < scopes.length; s++) {
+      var scope = scopes[s];
+      if (!scope) continue;
+      var named = scope.querySelectorAll('input[name="username"], input#username, input[name="login"], input[name="userId"], input[name="userid"], input[name="email"], input[type="email"], input[autocomplete="username"]');
+      for (var i = 0; i < named.length; i++) if (visible(named[i])) return named[i];
+      var inputs = scope.querySelectorAll('input[type="text"], input:not([type])');
+      for (var j = 0; j < inputs.length; j++) if (visible(inputs[j])) return inputs[j];
+    }
     return null;
   }
 
-  function setReactValue(el, value) {
+  function setInputValue(el, value) {
+    el.focus();
     var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
     setter.call(el, value);
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.blur();
+  }
+
+  /* fill each login box once (if the form redraws, the new boxes get filled too;
+     a box the user has cleared is left alone) */
+  function fillOnce(el, value) {
+    if (!el || !value || el.__clarixFilled || el.value) return;
+    el.__clarixFilled = true;
+    setInputValue(el, value);
   }
 
   function fillSavedLogin() {
-    if (filledThisVisit) return;
     var pw = passwordField();
     if (!pw) return;
-    filledThisVisit = true;
-    callNative('getLogin').then(function (saved) {
-      if (!saved || !saved.username || !saved.password) return;
-      var pwNow = passwordField();
-      if (!pwNow) return;
-      var user = usernameField(pwNow);
-      if (user && !user.value) setReactValue(user, saved.username);
-      if (!pwNow.value) setReactValue(pwNow, saved.password);
-      var remember = document.querySelector('input[type="checkbox"][name="rememberMe"], input[type="checkbox"]#rememberMe');
-      if (remember && !remember.checked) remember.click();
-    });
+    if (!saved) {
+      if (loading) return;
+      loading = true;
+      callNative('getLogin').then(function (r) {
+        loading = false;
+        if (r && r.username && r.password) { saved = r; fillSavedLogin(); }
+      });
+      return;
+    }
+    fillOnce(usernameField(pw), saved.username);
+    fillOnce(pw, saved.password);
+    var remember = document.querySelector('input[type="checkbox"][name="rememberMe"], input[type="checkbox"]#rememberMe');
+    if (remember && !remember.checked && !remember.__clarixFilled) { remember.__clarixFilled = true; remember.click(); }
   }
 
   function captureLogin() {
-    if (mode !== 'login') return;
     var pw = passwordField();
+    if (!pw || !pw.value) return;
     var user = usernameField(pw);
-    if (pw && user && pw.value && user.value) pending = { username: user.value, password: pw.value };
+    if (!user || !user.value) return;
+    var key = user.value + '\n' + pw.value;
+    if (key === lastSaved) return;
+    lastSaved = key;
+    saved = { username: user.value, password: pw.value };
+    callNative('saveLogin', saved);
   }
   document.addEventListener('submit', captureLogin, true);
   document.addEventListener('click', function (e) {
-    var b = e.target && e.target.closest && e.target.closest('button, input[type="submit"]');
+    var b = e.target && e.target.closest && e.target.closest('button, input[type="submit"], [role="button"]');
     if (b) captureLogin();
   }, true);
   document.addEventListener('keydown', function (e) { if (e.key === 'Enter') captureLogin(); }, true);
+  /* also catch it as the user leaves the password box */
+  document.addEventListener('change', function (e) {
+    if (e.target && e.target.type === 'password') captureLogin();
+  }, true);
 
   /* ---------- watch for screen changes ---------- */
   var timer = null;
